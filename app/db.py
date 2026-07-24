@@ -70,3 +70,78 @@ class Database:
         if not result.data:
             raise KeyError("Grant not found")
         return result.data[0]
+
+    def create_fact_check(self, grant_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        run = self.client.table("grant_fact_checks").insert({
+            "grant_id": grant_id,
+            "overall_verdict": result["overall_verdict"],
+            "overall_confidence": result["overall_confidence"],
+            "summary": result["summary"],
+            "source_url": result["source_url"],
+            "source_snapshot_hash": result["source_snapshot_hash"],
+            "raw_result": result.get("raw_result", {}),
+            "status": "completed",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }).execute().data[0]
+
+        rows = []
+        for field in result["fields"]:
+            rows.append({
+                "fact_check_id": run["id"],
+                "grant_id": grant_id,
+                "field_name": field["field_name"],
+                "current_value": field.get("current_value"),
+                "suggested_value": field.get("suggested_value"),
+                "verdict": field["verdict"],
+                "evidence": field.get("evidence", ""),
+                "evidence_url": field.get("evidence_url", result["source_url"]),
+                "confidence": field["confidence"],
+                "accepted": False,
+            })
+        if rows:
+            self.client.table("grant_field_checks").insert(rows).execute()
+        return self.get_fact_check(run["id"])
+
+    def get_fact_check(self, fact_check_id: str) -> dict[str, Any]:
+        run_result = self.client.table("grant_fact_checks").select("*").eq("id", fact_check_id).limit(1).execute()
+        if not run_result.data:
+            raise KeyError("Fact check not found")
+        run = run_result.data[0]
+        fields = self.client.table("grant_field_checks").select("*").eq("fact_check_id", fact_check_id).order("field_name").execute().data or []
+        run["fields"] = fields
+        return run
+
+    def latest_fact_check(self, grant_id: str) -> dict[str, Any] | None:
+        result = self.client.table("grant_fact_checks").select("id").eq("grant_id", grant_id).eq("status", "completed").order("created_at", desc=True).limit(1).execute()
+        if not result.data:
+            return None
+        return self.get_fact_check(result.data[0]["id"])
+
+    def accept_fact_check_fields(self, grant_id: str, fact_check_id: str, field_names: list[str]) -> dict[str, Any]:
+        check = self.get_fact_check(fact_check_id)
+        if check["grant_id"] != grant_id:
+            raise ValueError("Fact check does not belong to this grant")
+
+        allowed = {
+            "grant_title", "funder_name", "summary", "minimum_amount", "maximum_amount",
+            "opening_date", "deadline", "deadline_type", "application_url", "eligible_regions",
+            "eligible_causes", "eligible_organisation_types", "turnover_requirements",
+            "charity_registration_required", "match_funding_required", "application_process",
+            "is_currently_open",
+        }
+        selected = [field for field in check["fields"] if field["field_name"] in field_names and field["field_name"] in allowed]
+        payload = {field["field_name"]: field.get("suggested_value") for field in selected}
+        if payload:
+            payload["verification_status"] = "review"
+            payload["reviewed_at"] = None
+            self.update_grant(grant_id, payload)
+        if selected:
+            ids = [field["id"] for field in selected]
+            self.client.table("grant_field_checks").update({
+                "accepted": True,
+                "accepted_at": datetime.now(timezone.utc).isoformat(),
+            }).in_("id", ids).execute()
+        return {
+            "grant": self.get_grant(grant_id),
+            "fact_check": self.get_fact_check(fact_check_id),
+        }
