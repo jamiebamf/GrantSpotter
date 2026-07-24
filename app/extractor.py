@@ -1,8 +1,6 @@
 from __future__ import annotations
-import json
 import re
-from datetime import date, datetime
-from urllib.parse import urljoin, urlparse
+from datetime import date
 from dateutil import parser as date_parser
 from .config import settings
 from .models import GrantExtraction
@@ -59,15 +57,16 @@ def deterministic_extract(title: str, text: str, source_url: str) -> GrantExtrac
             continue
         try:
             parsed = date_parser.parse(value, dayfirst=True, fuzzy=True).date()
-            if target == "deadline": deadline = parsed
-            else: opening_date = parsed
+            if target == "deadline":
+                deadline = parsed
+            else:
+                opening_date = parsed
         except (ValueError, OverflowError):
             pass
     lower = text.lower()
     rolling = any(p in lower for p in ["rolling basis", "applications are open year-round", "open all year", "no closing date"])
     regions = [r for r in REGIONS if r.lower() in (location or text[:4000]).lower()]
     causes = [c for c in CAUSES if c.lower().replace("&", "and") in lower.replace("&", "and")]
-    application_url = source_url
     summary_lines = [x.strip() for x in text.splitlines() if len(x.strip()) > 80]
     summary = summary_lines[0][:700] if summary_lines else heading
     is_open = None
@@ -75,6 +74,7 @@ def deterministic_extract(title: str, text: str, source_url: str) -> GrantExtrac
         is_open = deadline >= date.today()
     elif rolling:
         is_open = True
+
     return GrantExtraction(
         grant_title=heading,
         funder_name=funder or "UK Government",
@@ -84,12 +84,17 @@ def deterministic_extract(title: str, text: str, source_url: str) -> GrantExtrac
         opening_date=opening_date,
         deadline=deadline,
         deadline_type="rolling" if rolling else ("fixed" if deadline else "unknown"),
-        application_url=application_url,
+        application_url=source_url,
         official_source_url=source_url,
         eligible_regions=regions or ([location] if location else ["National"]),
         eligible_causes=causes,
         eligible_organisation_types=[x.strip() for x in re.split(r",|/", who) if x.strip()],
+        turnover_requirements="",
+        charity_registration_required=None,
+        match_funding_required=None,
+        application_process="",
         is_currently_open=is_open,
+        evidence={},
     )
 
 
@@ -97,7 +102,9 @@ def ai_extract(title: str, text: str, source_url: str, baseline: GrantExtraction
     cfg = settings()
     if not cfg.openai_api_key:
         return baseline
+
     from openai import OpenAI
+
     client = OpenAI(api_key=cfg.openai_api_key)
     prompt = f"""Extract one UK grant opportunity from the official page below.
 Use only facts present in the page. Do not invent missing values.
