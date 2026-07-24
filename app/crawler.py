@@ -1,29 +1,39 @@
 from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
+
+from .adapters.catalogue import CatalogueAdapter, CatalogueSource, SOURCES
 from .adapters.govuk import GovUkFindAGrantAdapter
 from .config import settings
 from .db import Database
-from .extractor import deterministic_extract, ai_extract
+from .extractor import ai_extract, deterministic_extract
 from .models import CrawlResult
 from .utils import content_hash, fingerprint
 from .validator import validate_and_score
 
 
-async def crawl_govuk() -> CrawlResult:
+async def _process_source(
+    *,
+    source_slug: str,
+    source_name: str,
+    adapter: Any,
+    max_pages: int,
+    max_items: int,
+) -> CrawlResult:
     started = datetime.now(timezone.utc)
-    result = CrawlResult(source="GOV.UK Find a Grant", started_at=started)
+    result = CrawlResult(source=source_name, started_at=started)
     db = Database()
-    source = db.get_source_by_slug(GovUkFindAGrantAdapter.slug)
+    source = db.get_source_by_slug(source_slug)
     if not source:
-        raise RuntimeError("Source seed is missing. Run sql/schema.sql in Supabase first.")
-
-    adapter = GovUkFindAGrantAdapter()
-    try:
-        urls = await adapter.discover_detail_urls(
-            max_pages=max(1, settings().max_pages_per_run // 10 + 1)
+        raise RuntimeError(
+            f"Source seed '{source_slug}' is missing. Run the latest sql/schema.sql in Supabase."
         )
-        urls = urls[: settings().max_pages_per_run]
+
+    try:
+        urls = await adapter.discover_detail_urls(max_pages=max_pages)
+        urls = urls[:max_items]
         result.discovered = len(urls)
 
         for url in urls:
@@ -36,7 +46,6 @@ async def crawl_govuk() -> CrawlResult:
 
                 digest = content_hash(clean_text)
                 previous = db.get_page(final_url)
-
                 page_payload: dict[str, Any] = {
                     "source_id": source["id"],
                     "url": final_url,
@@ -61,10 +70,6 @@ async def crawl_govuk() -> CrawlResult:
 
                 baseline = deterministic_extract(page_title, clean_text, final_url)
                 extraction_notes: list[str] = []
-
-                # AI is an enhancement, not a single point of failure. If the
-                # API key, model, schema, quota or response fails, save the
-                # deterministic extraction for manual review instead.
                 try:
                     extracted = ai_extract(page_title, clean_text, final_url, baseline)
                 except Exception as ai_exc:
@@ -73,9 +78,8 @@ async def crawl_govuk() -> CrawlResult:
                         f"AI extraction unavailable; deterministic fallback used: {str(ai_exc)[:500]}"
                     )
 
-                score, reasons = validate_and_score(
-                    extracted, "find-government-grants.service.gov.uk"
-                )
+                source_domain = urlparse(final_url).netloc.lower()
+                score, reasons = validate_and_score(extracted, source_domain)
                 reasons = extraction_notes + reasons
 
                 fp = fingerprint(
@@ -85,7 +89,6 @@ async def crawl_govuk() -> CrawlResult:
                     extracted.maximum_amount,
                     extracted.application_url or extracted.official_source_url,
                 )
-
                 verification = (
                     "approved"
                     if score >= settings().auto_publish_min_score and not extraction_notes
@@ -120,7 +123,6 @@ async def crawl_govuk() -> CrawlResult:
                     result.created += 1
                 else:
                     result.updated += 1
-
                 if verification == "review":
                     result.review_required += 1
                     db.add_review(
@@ -129,7 +131,6 @@ async def crawl_govuk() -> CrawlResult:
                         extracted.model_dump(mode="json"),
                     )
                 result.processed += 1
-
             except Exception as exc:
                 result.failed += 1
                 try:
@@ -155,3 +156,66 @@ async def crawl_govuk() -> CrawlResult:
 
     result.finished_at = datetime.now(timezone.utc)
     return result
+
+
+async def crawl_govuk() -> CrawlResult:
+    adapter = GovUkFindAGrantAdapter()
+    return await _process_source(
+        source_slug=GovUkFindAGrantAdapter.slug,
+        source_name="GOV.UK Find a Grant",
+        adapter=adapter,
+        max_pages=max(1, settings().max_pages_per_run // 10 + 1),
+        max_items=settings().max_pages_per_run,
+    )
+
+
+async def crawl_catalogue_source(source: CatalogueSource) -> CrawlResult:
+    return await _process_source(
+        source_slug=source.slug,
+        source_name=source.name,
+        adapter=CatalogueAdapter(source),
+        max_pages=source.max_listing_pages,
+        max_items=settings().max_pages_per_run,
+    )
+
+
+async def crawl_all_sources() -> dict[str, Any]:
+    started_at = datetime.now(timezone.utc)
+    source_results: list[dict[str, Any]] = []
+    source_errors: list[dict[str, str]] = []
+
+    try:
+        govuk_result = await crawl_govuk()
+        source_results.append(govuk_result.model_dump(mode="json"))
+    except Exception as exc:
+        source_errors.append({"source": "GOV.UK Find a Grant", "error": str(exc)[:1200]})
+
+    for source in SOURCES:
+        try:
+            result = await crawl_catalogue_source(source)
+            source_results.append(result.model_dump(mode="json"))
+        except Exception as exc:
+            source_errors.append({"source": source.name, "error": str(exc)[:1200]})
+
+    totals = {
+        key: sum(int(item.get(key, 0)) for item in source_results)
+        for key in (
+            "discovered",
+            "processed",
+            "created",
+            "updated",
+            "unchanged",
+            "review_required",
+            "failed",
+        )
+    }
+    return {
+        "source": "All configured grant sources",
+        **totals,
+        "sources_completed": len(source_results),
+        "sources_failed": len(source_errors),
+        "source_results": source_results,
+        "source_errors": source_errors,
+        "started_at": started_at.isoformat(),
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+    }
