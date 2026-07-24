@@ -3,15 +3,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-class EvidenceItem(BaseModel):
-    value: str | int | float | bool | None
-    evidence: str
-
-
 class GrantExtraction(BaseModel):
-    # OpenAI Structured Outputs requires every property to appear in the
-    # JSON Schema required array. Values that may be unknown are nullable,
-    # but the keys themselves are always returned.
     grant_title: str
     funder_name: str
     summary: str
@@ -30,7 +22,6 @@ class GrantExtraction(BaseModel):
     match_funding_required: bool | None
     application_process: str
     is_currently_open: bool | None
-    evidence: dict[str, EvidenceItem]
 
 
 class CrawlResult(BaseModel):
