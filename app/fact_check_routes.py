@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
+from fastapi.responses import FileResponse
 
 from .config import settings
 from .db import Database
 from .fact_checker import fact_check_grant
 
 router = APIRouter(prefix="/admin", tags=["fact-checking"])
+FACT_CHECK_HTML = Path(__file__).with_name("fact_check_dashboard.html")
 
 
 def require_admin(x_admin_key: str = Header(default="")) -> None:
     if not x_admin_key or x_admin_key != settings().admin_api_key:
         raise HTTPException(status_code=401, detail="Invalid admin key")
+
+
+@router.get("/fact-checker", include_in_schema=False)
+def fact_check_dashboard():
+    if not FACT_CHECK_HTML.exists():
+        raise HTTPException(status_code=500, detail="Fact check dashboard file is missing")
+    return FileResponse(FACT_CHECK_HTML, media_type="text/html")
 
 
 @router.post("/grants/{grant_id}/fact-check", dependencies=[Depends(require_admin)])
