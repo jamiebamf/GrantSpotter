@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GrantSpotter Admin</title>
+<style>
+:root{--bg:#07111f;--panel:#0d1a2b;--panel2:#122238;--text:#eef6ff;--muted:#8fa4bd;--line:#24364d;--blue:#47a7ff;--green:#31d39a;--amber:#ffbc5b;--red:#ff6b78;--purple:#9c7cff;--shadow:0 18px 50px rgba(0,0,0,.28)}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#06101d,#0a1727 58%,#0e1b30);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh}button,input,select,textarea{font:inherit}.hidden{display:none!important}
+.login{min-height:100vh;display:grid;place-items:center;padding:24px}.login-card{width:min(440px,100%);background:rgba(13,26,43,.96);border:1px solid var(--line);border-radius:24px;padding:30px;box-shadow:var(--shadow)}.brand{font-weight:800;font-size:25px;letter-spacing:-.5px}.brand span{color:var(--blue)}.login p{color:var(--muted)}
+.input,.select,.textarea{width:100%;border:1px solid var(--line);background:#081423;color:var(--text);border-radius:12px;padding:11px 13px;outline:none}.input:focus,.select:focus,.textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(71,167,255,.12)}.textarea{min-height:110px;resize:vertical}.btn{border:0;border-radius:12px;padding:11px 15px;font-weight:750;cursor:pointer;color:#fff;background:#1c3048}.btn:hover{filter:brightness(1.08)}.btn-primary{background:linear-gradient(135deg,#268ae8,#5db7ff)}.btn-green{background:#12865f}.btn-red{background:#a93343}.btn-amber{background:#9b6418}.btn-ghost{background:transparent;border:1px solid var(--line)}.btn-sm{padding:8px 11px;border-radius:10px;font-size:12px}.btn:disabled{opacity:.5;cursor:not-allowed}
+.shell{display:grid;grid-template-columns:250px 1fr;min-height:100vh}.sidebar{padding:24px 18px;border-right:1px solid var(--line);background:rgba(5,14,25,.88);position:sticky;top:0;height:100vh}.nav{margin-top:30px;display:grid;gap:8px}.nav button{width:100%;text-align:left}.sidebar-foot{position:absolute;bottom:20px;left:18px;right:18px;color:var(--muted);font-size:12px}.main{padding:28px;min-width:0}.topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:24px}.topbar h1{margin:0;font-size:28px}.topbar p{margin:4px 0 0;color:var(--muted)}.top-actions{display:flex;gap:10px;flex-wrap:wrap}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:14px;margin-bottom:20px}.stat{background:rgba(13,26,43,.93);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:var(--shadow)}.stat .label{color:var(--muted);font-size:12px}.stat .value{font-size:28px;font-weight:850;margin-top:4px}.dot{width:9px;height:9px;border-radius:99px;display:inline-block;margin-right:7px}.dot.running{background:var(--amber);box-shadow:0 0 0 6px rgba(255,188,91,.12)}.dot.completed{background:var(--green)}.dot.failed{background:var(--red)}.dot.idle{background:var(--muted)}
+.panel{background:rgba(13,26,43,.94);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}.toolbar{padding:16px;display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(3,minmax(140px,.65fr));gap:10px;border-bottom:1px solid var(--line)}.table-wrap{overflow:auto}.grant-table{width:100%;border-collapse:collapse;min-width:980px}.grant-table th{position:sticky;top:0;background:#0b1828;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:12px 14px;border-bottom:1px solid var(--line)}.grant-table td{padding:14px;border-bottom:1px solid rgba(36,54,77,.75);vertical-align:top}.grant-table tr:hover{background:rgba(71,167,255,.045)}.title{font-weight:750;max-width:350px}.sub{color:var(--muted);font-size:12px;margin-top:4px}.badge{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.badge.review{background:rgba(255,188,91,.14);color:#ffd18a}.badge.approved{background:rgba(49,211,154,.13);color:#6be6b6}.badge.closed{background:rgba(143,164,189,.14);color:#b6c6d7}.badge.published{background:rgba(156,124,255,.16);color:#c2afff}.badge.rejected{background:rgba(255,107,120,.13);color:#ff9ba5}.score{font-weight:800}.score.low{color:var(--red)}.score.mid{color:var(--amber)}.score.high{color:var(--green)}.empty{padding:50px;text-align:center;color:var(--muted)}
+.modal{position:fixed;inset:0;background:rgba(2,7,14,.78);backdrop-filter:blur(7px);display:grid;place-items:center;padding:20px;z-index:20}.modal-card{width:min(980px,100%);max-height:92vh;overflow:auto;background:#0b1828;border:1px solid var(--line);border-radius:22px;box-shadow:0 30px 90px rgba(0,0,0,.5)}.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:20px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#0b1828;z-index:2}.modal-head h2{margin:0;font-size:20px}.close{width:38px;height:38px;border-radius:11px}.form{padding:22px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field{display:grid;gap:6px}.field.full{grid-column:1/-1}.field label{font-size:12px;color:var(--muted);font-weight:700}.modal-actions{display:flex;justify-content:space-between;gap:12px;padding:18px 22px;border-top:1px solid var(--line);position:sticky;bottom:0;background:#0b1828}.action-group{display:flex;gap:9px;flex-wrap:wrap}.notice{padding:12px 14px;border:1px solid var(--line);border-radius:12px;color:var(--muted);margin-bottom:14px;white-space:pre-wrap}.toast{position:fixed;right:22px;bottom:22px;background:#13263d;border:1px solid var(--line);border-radius:13px;padding:13px 16px;box-shadow:var(--shadow);z-index:40;max-width:360px}.toast.error{border-color:#7e3340;color:#ffabb3}.link{color:#7bc0ff;text-decoration:none}.link:hover{text-decoration:underline}
+@media(max-width:1050px){.stats{grid-template-columns:repeat(3,1fr)}.toolbar{grid-template-columns:1fr 1fr}.shell{grid-template-columns:86px 1fr}.sidebar .brand-text,.sidebar .nav-label,.sidebar-foot{display:none}.sidebar{padding:22px 12px}.nav button{text-align:center;padding:12px 6px}.main{padding:20px}}
+@media(max-width:700px){.shell{display:block}.sidebar{height:auto;position:static;border-right:0;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:14px 16px}.sidebar .brand-text{display:inline}.nav{margin:0;display:flex}.nav button:not(:first-child){display:none}.main{padding:14px}.topbar{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:1fr 1fr}.toolbar{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.field.full{grid-column:auto}.modal{padding:0}.modal-card{height:100vh;max-height:none;border-radius:0}.modal-actions{flex-direction:column}.action-group{width:100%}.action-group .btn{flex:1}.stat .value{font-size:22px}}
+</style>
+</head>
+<body>
+<section id="loginView" class="login">
+  <div class="login-card">
+    <div class="brand">Grant<span>Spotter</span></div>
+    <h1>Admin dashboard</h1>
+    <p>Enter the same admin key stored in Render. It stays only in this browser session.</p>
+    <form id="loginForm">
+      <input id="adminKey" class="input" type="password" autocomplete="current-password" placeholder="Admin API key" required>
+      <button class="btn btn-primary" style="width:100%;margin-top:12px">Open dashboard</button>
+    </form>
+    <div id="loginError" class="sub" style="color:var(--red);margin-top:12px"></div>
+  </div>
+</section>
+
+<div id="appView" class="shell hidden">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-text">Grant</span><span>Spotter</span></div>
+    <nav class="nav">
+      <button class="btn btn-primary"><span class="nav-label">Grant review</span><span aria-hidden="true">✓</span></button>
+      <button id="refreshBtn" class="btn btn-ghost"><span class="nav-label">Refresh data</span><span aria-hidden="true">↻</span></button>
+      <button id="logoutBtn" class="btn btn-ghost"><span class="nav-label">Log out</span><span aria-hidden="true">↪</span></button>
+    </nav>
+    <div class="sidebar-foot">Secure API-backed admin area</div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div><h1>Grant review</h1><p>Review, edit, approve and publish GOV.UK grant opportunities.</p></div>
+      <div class="top-actions">
+        <button id="crawlBtn" class="btn btn-primary">Run crawler</button>
+        <button id="statusBtn" class="btn btn-ghost"><span id="crawlDot" class="dot idle"></span><span id="crawlText">Idle</span></button>
+      </div>
+    </header>
+
+    <section class="stats">
+      <div class="stat"><div class="label">All grants</div><div id="statAll" class="value">—</div></div>
+      <div class="stat"><div class="label">Needs review</div><div id="statReview" class="value">—</div></div>
+      <div class="stat"><div class="label">Approved</div><div id="statApproved" class="value">—</div></div>
+      <div class="stat"><div class="label">Published</div><div id="statPublished" class="value">—</div></div>
+      <div class="stat"><div class="label">Closed / rejected</div><div id="statClosed" class="value">—</div></div>
+    </section>
+
+    <section class="panel">
+      <div class="toolbar">
+        <input id="searchInput" class="input" placeholder="Search title, funder, region or cause">
+        <select id="statusFilter" class="select"><option value="">All statuses</option><option value="review">Review</option><option value="approved">Approved</option><option value="published">Published</option><option value="closed">Closed</option><option value="rejected">Rejected</option></select>
+        <select id="scoreFilter" class="select"><option value="">All confidence</option><option value="high">90–100</option><option value="mid">70–89</option><option value="low">Below 70</option></select>
+        <select id="sortFilter" class="select"><option value="newest">Newest first</option><option value="scoreAsc">Lowest confidence</option><option value="deadline">Nearest deadline</option><option value="title">Title A–Z</option></select>
+      </div>
+      <div class="table-wrap">
+        <table class="grant-table">
+          <thead><tr><th>Grant</th><th>Status</th><th>Funding</th><th>Deadline</th><th>Confidence</th><th></th></tr></thead>
+          <tbody id="grantRows"></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden">No grants match these filters.</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="editModal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head"><div><h2 id="modalTitle">Review grant</h2><div id="modalMeta" class="sub"></div></div><button id="closeModal" class="btn btn-ghost close">×</button></div>
+    <form id="editForm" class="form">
+      <div id="validationNotice" class="notice"></div>
+      <div class="grid">
+        <div class="field full"><label>Grant title</label><input name="grant_title" class="input" required></div>
+        <div class="field"><label>Funder</label><input name="funder_name" class="input" required></div>
+        <div class="field"><label>Application URL</label><input name="application_url" class="input" type="url"></div>
+        <div class="field"><label>Minimum amount (£)</label><input name="minimum_amount" class="input" type="number" min="0" step="0.01"></div>
+        <div class="field"><label>Maximum amount (£)</label><input name="maximum_amount" class="input" type="number" min="0" step="0.01"></div>
+        <div class="field"><label>Opening date</label><input name="opening_date" class="input" type="date"></div>
+        <div class="field"><label>Deadline</label><input name="deadline" class="input" type="date"></div>
+        <div class="field"><label>Deadline type</label><select name="deadline_type" class="select"><option value="unknown">Unknown</option><option value="fixed">Fixed</option><option value="rolling">Rolling</option></select></div>
+        <div class="field"><label>Currently open</label><select name="is_currently_open" class="select"><option value="">Unknown</option><option value="true">Yes</option><option value="false">No</option></select></div>
+        <div class="field full"><label>Summary</label><textarea name="summary" class="textarea"></textarea></div>
+        <div class="field"><label>Eligible regions (one per line)</label><textarea name="eligible_regions" class="textarea"></textarea></div>
+        <div class="field"><label>Causes (one per line)</label><textarea name="eligible_causes" class="textarea"></textarea></div>
+        <div class="field full"><label>Organisation types (one per line)</label><textarea name="eligible_organisation_types" class="textarea"></textarea></div>
+        <div class="field"><label>Turnover requirements</label><textarea name="turnover_requirements" class="textarea"></textarea></div>
+        <div class="field"><label>Application process</label><textarea name="application_process" class="textarea"></textarea></div>
+      </div>
+    </form>
+    <div class="modal-actions">
+      <div class="action-group"><button id="sourceBtn" class="btn btn-ghost">Open official source</button><button id="rejectBtn" class="btn btn-red">Reject</button></div>
+      <div class="action-group"><button id="saveBtn" class="btn btn-ghost">Save changes</button><button id="approveBtn" class="btn btn-green">Approve</button><button id="publishBtn" class="btn btn-primary">Publish</button></div>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script>
+const state={key:sessionStorage.getItem('gs_admin_key')||'',grants:[],current:null,statusTimer:null};
+const $=s=>document.querySelector(s);const money=n=>n==null?'—':new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP',maximumFractionDigits:0}).format(n);const dateFmt=d=>d?new Date(d+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'—';
+function headers(){return {'X-Admin-Key':state.key,'Content-Type':'application/json'}}
+async function api(path,opts={}){const r=await fetch(path,{...opts,headers:{...headers(),...(opts.headers||{})}});if(r.status===401){logout();throw new Error('Admin key rejected');}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.detail||data.error||`Request failed (${r.status})`);return data}
+function toast(msg,error=false){const e=$('#toast');e.textContent=msg;e.className='toast'+(error?' error':'');setTimeout(()=>e.classList.add('hidden'),3500)}
+function logout(){sessionStorage.removeItem('gs_admin_key');state.key='';$('#appView').classList.add('hidden');$('#loginView').classList.remove('hidden')}
+async function login(key){state.key=key;await api('/admin/crawl/status');sessionStorage.setItem('gs_admin_key',key);$('#loginView').classList.add('hidden');$('#appView').classList.remove('hidden');await Promise.all([loadGrants(),loadStatus()]);startStatusPolling()}
+$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginError').textContent='';try{await login($('#adminKey').value.trim())}catch(err){$('#loginError').textContent=err.message}});$('#logoutBtn').onclick=logout;$('#refreshBtn').onclick=()=>loadGrants(true);
+async function loadGrants(showToast=false){try{state.grants=await api('/admin/grants?limit=500');renderStats();renderRows();if(showToast)toast('Grant data refreshed')}catch(e){toast(e.message,true)}}
+function renderStats(){const c=s=>state.grants.filter(g=>g.verification_status===s).length;$('#statAll').textContent=state.grants.length;$('#statReview').textContent=c('review');$('#statApproved').textContent=c('approved');$('#statPublished').textContent=c('published');$('#statClosed').textContent=c('closed')+c('rejected')}
+function searchable(g){return [g.grant_title,g.funder_name,...(g.eligible_regions||[]),...(g.eligible_causes||[])].join(' ').toLowerCase()}
+function filtered(){let a=[...state.grants],q=$('#searchInput').value.toLowerCase().trim(),st=$('#statusFilter').value,sc=$('#scoreFilter').value,sort=$('#sortFilter').value;if(q)a=a.filter(g=>searchable(g).includes(q));if(st)a=a.filter(g=>g.verification_status===st);if(sc==='high')a=a.filter(g=>g.confidence_score>=90);if(sc==='mid')a=a.filter(g=>g.confidence_score>=70&&g.confidence_score<90);if(sc==='low')a=a.filter(g=>g.confidence_score<70);if(sort==='scoreAsc')a.sort((x,y)=>x.confidence_score-y.confidence_score);else if(sort==='deadline')a.sort((x,y)=>(x.deadline||'9999').localeCompare(y.deadline||'9999'));else if(sort==='title')a.sort((x,y)=>x.grant_title.localeCompare(y.grant_title));else a.sort((x,y)=>(y.created_at||'').localeCompare(x.created_at||''));return a}
+function scoreClass(n){return n>=90?'high':n>=70?'mid':'low'}
+function renderRows(){const rows=$('#grantRows'),items=filtered();rows.innerHTML='';$('#emptyState').classList.toggle('hidden',items.length>0);for(const g of items){const tr=document.createElement('tr');tr.innerHTML=`<td><div class="title"></div><div class="sub funder"></div></td><td><span class="badge ${g.verification_status}">${g.verification_status}</span></td><td>${money(g.maximum_amount??g.minimum_amount)}</td><td>${g.deadline_type==='rolling'?'Rolling':dateFmt(g.deadline)}</td><td><span class="score ${scoreClass(g.confidence_score)}">${g.confidence_score}%</span></td><td><button class="btn btn-sm btn-ghost">Review</button></td>`;tr.querySelector('.title').textContent=g.grant_title;tr.querySelector('.funder').textContent=g.funder_name;tr.querySelector('button').onclick=()=>openGrant(g.id);rows.appendChild(tr)}}
+['searchInput','statusFilter','scoreFilter','sortFilter'].forEach(id=>$('#'+id).addEventListener(id==='searchInput'?'input':'change',renderRows));
+function val(v){return v==null?'':v}function lines(v){return (v||[]).join('\n')}function fromLines(v){return v.split('\n').map(x=>x.trim()).filter(Boolean)}
+function openGrant(id){const g=state.grants.find(x=>x.id===id);state.current=g;$('#modalTitle').textContent=g.grant_title;$('#modalMeta').textContent=`Confidence ${g.confidence_score}% · ${g.verification_status}`;$('#validationNotice').textContent=(g.validation_notes||[]).length?'Review notes:\n• '+g.validation_notes.join('\n• '):'No validation warnings.';const f=$('#editForm');for(const n of ['grant_title','funder_name','application_url','minimum_amount','maximum_amount','opening_date','deadline','deadline_type','summary','turnover_requirements','application_process'])f.elements[n].value=val(g[n]);f.elements.is_currently_open.value=g.is_currently_open==null?'':String(g.is_currently_open);for(const n of ['eligible_regions','eligible_causes','eligible_organisation_types'])f.elements[n].value=lines(g[n]);$('#publishBtn').disabled=!['approved','published'].includes(g.verification_status);$('#editModal').classList.remove('hidden')}
+function closeModal(){$('#editModal').classList.add('hidden');state.current=null}$('#closeModal').onclick=closeModal;$('#editModal').addEventListener('click',e=>{if(e.target.id==='editModal')closeModal()});
+function payload(){const f=$('#editForm'),p={};for(const n of ['grant_title','funder_name','application_url','summary','deadline_type','turnover_requirements','application_process'])p[n]=f.elements[n].value.trim();for(const n of ['minimum_amount','maximum_amount'])p[n]=f.elements[n].value===''?null:Number(f.elements[n].value);for(const n of ['opening_date','deadline'])p[n]=f.elements[n].value||null;p.is_currently_open=f.elements.is_currently_open.value===''?null:f.elements.is_currently_open.value==='true';for(const n of ['eligible_regions','eligible_causes','eligible_organisation_types'])p[n]=fromLines(f.elements[n].value);return p}
+async function save(){if(!state.current)return;const updated=await api(`/admin/grants/${state.current.id}`,{method:'PATCH',body:JSON.stringify(payload())});replaceGrant(updated);toast('Changes saved');return updated}
+function replaceGrant(g){const i=state.grants.findIndex(x=>x.id===g.id);if(i>=0)state.grants[i]=g;state.current=g;renderStats();renderRows();openGrant(g.id)}
+$('#saveBtn').onclick=()=>save().catch(e=>toast(e.message,true));$('#approveBtn').onclick=async()=>{try{await save();const g=await api(`/admin/grants/${state.current.id}/review`,{method:'POST',body:JSON.stringify({action:'approve',notes:''})});replaceGrant(g);toast('Grant approved')}catch(e){toast(e.message,true)}};$('#rejectBtn').onclick=async()=>{if(!confirm('Reject this grant?'))return;try{const g=await api(`/admin/grants/${state.current.id}/review`,{method:'POST',body:JSON.stringify({action:'reject',notes:'Rejected in admin dashboard'})});replaceGrant(g);toast('Grant rejected')}catch(e){toast(e.message,true)}};$('#publishBtn').onclick=async()=>{if(!confirm('Publish this approved grant to the website?'))return;try{await save();const r=await api(`/admin/grants/${state.current.id}/publish`,{method:'POST'});replaceGrant(r.grant);toast('Grant published')}catch(e){toast(e.message,true)}};$('#sourceBtn').onclick=()=>{if(state.current)window.open(state.current.official_source_url||state.current.application_url,'_blank','noopener')};
+async function runCrawl(){try{const r=await api('/admin/crawl/govuk',{method:'POST'});toast(r.status==='already_running'?'Crawler is already running':'Crawler started');await loadStatus()}catch(e){toast(e.message,true)}}$('#crawlBtn').onclick=runCrawl;
+async function loadStatus(){try{const s=await api('/admin/crawl/status'),status=s.status||'idle';$('#crawlText').textContent=status[0].toUpperCase()+status.slice(1);$('#crawlDot').className='dot '+status;$('#crawlBtn').disabled=['starting','running'].includes(status);if(status==='completed'&&s.result)$('#crawlText').textContent=`Completed · ${s.result.created} created`;if(status==='failed'&&s.error)toast('Crawler failed: '+s.error,true)}catch(e){console.error(e)}}$('#statusBtn').onclick=loadStatus;function startStatusPolling(){clearInterval(state.statusTimer);state.statusTimer=setInterval(loadStatus,10000)}
+if(state.key)login(state.key).catch(()=>logout());
+</script>
+</body>
+</html>
