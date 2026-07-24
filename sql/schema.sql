@@ -90,8 +90,24 @@ create table if not exists public.grant_reviews (
 );
 
 insert into public.grant_sources (slug, source_name, base_url, grants_page_url, source_type, trust_score)
-values ('govuk-find-a-grant', 'GOV.UK Find a Grant', 'https://www.find-government-grants.service.gov.uk', 'https://www.find-government-grants.service.gov.uk/grants', 'official-government', 100)
-on conflict (slug) do update set grants_page_url = excluded.grants_page_url;
+values
+  ('govuk-find-a-grant', 'GOV.UK Find a Grant', 'https://www.find-government-grants.service.gov.uk', 'https://www.find-government-grants.service.gov.uk/grants', 'official-government', 100),
+  ('ukri-opportunities', 'UKRI Funding Opportunities', 'https://www.ukri.org', 'https://www.ukri.org/opportunity/', 'official-public-body', 100),
+  ('govuk-business-finance', 'GOV.UK Business Finance Support', 'https://www.gov.uk', 'https://www.gov.uk/business-finance-support?types_of_support%5B%5D=grant', 'official-government', 100),
+  ('fcdo-development-funding', 'FCDO International Development Funding', 'https://www.gov.uk', 'https://www.gov.uk/international-development-funding', 'official-government', 100),
+  ('scotland-business-funding', 'Find Business Support Scotland', 'https://findbusinesssupport.gov.scot', 'https://findbusinesssupport.gov.scot/search?type=Funding', 'official-government', 100),
+  ('national-lottery-community-fund', 'The National Lottery Community Fund', 'https://www.tnlcommunityfund.org.uk', 'https://www.tnlcommunityfund.org.uk/funding/programmes', 'official-funder', 98),
+  ('heritage-fund', 'National Lottery Heritage Fund', 'https://www.heritagefund.org.uk', 'https://www.heritagefund.org.uk/funding', 'official-funder', 98),
+  ('arts-council-england', 'Arts Council England', 'https://www.artscouncil.org.uk', 'https://www.artscouncil.org.uk/our-open-funds', 'official-public-body', 98),
+  ('sport-england-funds', 'Sport England Funds', 'https://www.sportengland.org', 'https://www.sportengland.org/funds-and-campaigns/our-funds', 'official-public-body', 98)
+on conflict (slug) do update set
+  source_name = excluded.source_name,
+  base_url = excluded.base_url,
+  grants_page_url = excluded.grants_page_url,
+  source_type = excluded.source_type,
+  trust_score = excluded.trust_score,
+  is_active = true,
+  updated_at = now();
 
 alter table public.grant_sources enable row level security;
 alter table public.crawl_pages enable row level security;
