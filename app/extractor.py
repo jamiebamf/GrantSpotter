@@ -94,7 +94,6 @@ def deterministic_extract(title: str, text: str, source_url: str) -> GrantExtrac
         match_funding_required=None,
         application_process="",
         is_currently_open=is_open,
-        evidence={},
     )
 
 
