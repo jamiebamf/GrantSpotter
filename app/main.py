@@ -3,7 +3,10 @@ import asyncio
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from pathlib import Path
+from typing import Any
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import FileResponse, RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .config import settings
 from .crawler import crawl_govuk
@@ -20,6 +23,27 @@ crawl_state: dict = {
     "finished_at": None,
     "result": None,
     "error": None,
+}
+
+ADMIN_HTML = Path(__file__).with_name("admin_dashboard.html")
+EDITABLE_GRANT_FIELDS = {
+    "grant_title",
+    "funder_name",
+    "summary",
+    "minimum_amount",
+    "maximum_amount",
+    "opening_date",
+    "deadline",
+    "deadline_type",
+    "application_url",
+    "eligible_regions",
+    "eligible_causes",
+    "eligible_organisation_types",
+    "turnover_requirements",
+    "charity_registration_required",
+    "match_funding_required",
+    "application_process",
+    "is_currently_open",
 }
 
 
@@ -105,7 +129,19 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="GrantSpotter Crawler API", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="GrantSpotter Crawler API", version="1.3.0", lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/admin/dashboard")
+
+
+@app.get("/admin/dashboard", include_in_schema=False)
+def admin_dashboard():
+    if not ADMIN_HTML.exists():
+        raise HTTPException(status_code=500, detail="Admin dashboard file is missing")
+    return FileResponse(ADMIN_HTML, media_type="text/html")
 
 
 @app.get("/health")
@@ -132,6 +168,33 @@ def list_grants(status: str | None = Query(default=None), limit: int = Query(def
     return Database().list_grants(status=status, limit=limit)
 
 
+@app.patch("/admin/grants/{grant_id}", dependencies=[Depends(require_admin)])
+def edit_grant(grant_id: str, payload: dict[str, Any] = Body(...)):
+    db = Database()
+    grant = db.get_grant(grant_id)
+    if not grant:
+        raise HTTPException(status_code=404, detail="Grant not found")
+
+    unknown = set(payload) - EDITABLE_GRANT_FIELDS
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported fields: {', '.join(sorted(unknown))}",
+        )
+
+    clean_payload = {key: value for key, value in payload.items() if key in EDITABLE_GRANT_FIELDS}
+    if not clean_payload:
+        raise HTTPException(status_code=422, detail="No editable fields supplied")
+
+    if not clean_payload.get("grant_title", grant.get("grant_title")):
+        raise HTTPException(status_code=422, detail="Grant title cannot be empty")
+    if not clean_payload.get("funder_name", grant.get("funder_name")):
+        raise HTTPException(status_code=422, detail="Funder name cannot be empty")
+
+    clean_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return db.update_grant(grant_id, clean_payload)
+
+
 @app.post("/admin/grants/{grant_id}/review", dependencies=[Depends(require_admin)])
 def review_grant(grant_id: str, action: ReviewAction):
     db = Database()
@@ -141,13 +204,19 @@ def review_grant(grant_id: str, action: ReviewAction):
     if action.action == "reject":
         return db.update_grant(
             grant_id,
-            {"verification_status": "rejected", "validation_notes": [action.notes]},
+            {
+                "verification_status": "rejected",
+                "validation_notes": [action.notes] if action.notes else ["Rejected in admin dashboard"],
+                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
         )
     return db.update_grant(
         grant_id,
         {
             "verification_status": "approved",
             "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     )
 
@@ -166,6 +235,7 @@ async def publish_grant(grant_id: str):
         {
             "verification_status": "published",
             "published_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     )
     return {"grant": updated, "website": website_result}
