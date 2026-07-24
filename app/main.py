@@ -9,7 +9,7 @@ from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .config import settings
-from .crawler import crawl_govuk
+from .crawler import crawl_all_sources
 from .db import Database
 from .fact_check_routes import router as fact_check_router
 from .models import ReviewAction
@@ -63,11 +63,11 @@ def execute_crawl_in_thread() -> None:
         "error": None,
     })
     try:
-        result = asyncio.run(crawl_govuk())
+        result = asyncio.run(crawl_all_sources())
         crawl_state.update({
             "status": "completed",
             "finished_at": datetime.now(timezone.utc).isoformat(),
-            "result": result.model_dump(mode="json"),
+            "result": result,
             "error": None,
         })
     except Exception as exc:
@@ -102,11 +102,11 @@ def start_crawl_thread() -> dict:
         })
         crawl_thread = threading.Thread(
             target=execute_crawl_in_thread,
-            name="grantspotter-crawl",
+            name="grantspotter-all-sources-crawl",
             daemon=True,
         )
         crawl_thread.start()
-        return {"status": "started", "started_at": started_at}
+        return {"status": "started", "started_at": started_at, "scope": "all_sources"}
 
 
 async def scheduled_crawl() -> None:
@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
         "cron",
         hour=settings().schedule_hour_utc,
         minute=0,
-        id="govuk-daily",
+        id="all-sources-daily",
         replace_existing=True,
     )
     scheduler.start()
@@ -130,7 +130,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="GrantSpotter Crawler API", version="1.4.0", lifespan=lifespan)
+app = FastAPI(title="GrantSpotter Crawler API", version="1.5.0", lifespan=lifespan)
 app.include_router(fact_check_router)
 
 
@@ -155,8 +155,14 @@ def health():
     }
 
 
+@app.post("/admin/crawl/all", dependencies=[Depends(require_admin)], status_code=202)
+def run_all_sources_crawl():
+    return start_crawl_thread()
+
+
 @app.post("/admin/crawl/govuk", dependencies=[Depends(require_admin)], status_code=202)
-def run_govuk_crawl():
+def run_legacy_crawl_route():
+    # Kept for the existing dashboard and PowerShell commands. It now runs all sources.
     return start_crawl_thread()
 
 
