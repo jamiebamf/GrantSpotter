@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
@@ -11,7 +12,8 @@ from .models import ReviewAction
 from .publisher import publish_to_website
 
 scheduler = AsyncIOScheduler(timezone="UTC")
-crawl_task: asyncio.Task | None = None
+crawl_thread: threading.Thread | None = None
+crawl_lock = threading.Lock()
 crawl_state: dict = {
     "status": "idle",
     "started_at": None,
@@ -26,8 +28,8 @@ def require_admin(x_admin_key: str = Header(default="")) -> None:
         raise HTTPException(status_code=401, detail="Invalid admin key")
 
 
-async def execute_crawl() -> None:
-    global crawl_task
+def execute_crawl_in_thread() -> None:
+    global crawl_thread
     crawl_state.update({
         "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -36,7 +38,7 @@ async def execute_crawl() -> None:
         "error": None,
     })
     try:
-        result = await crawl_govuk()
+        result = asyncio.run(crawl_govuk())
         crawl_state.update({
             "status": "completed",
             "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -52,15 +54,40 @@ async def execute_crawl() -> None:
         })
         print(f"Crawl failed: {exc}")
     finally:
-        crawl_task = None
+        with crawl_lock:
+            crawl_thread = None
+
+
+def start_crawl_thread() -> dict:
+    global crawl_thread
+    with crawl_lock:
+        if crawl_thread and crawl_thread.is_alive():
+            return {
+                "status": "already_running",
+                "started_at": crawl_state["started_at"],
+            }
+
+        started_at = datetime.now(timezone.utc).isoformat()
+        crawl_state.update({
+            "status": "starting",
+            "started_at": started_at,
+            "finished_at": None,
+            "result": None,
+            "error": None,
+        })
+        crawl_thread = threading.Thread(
+            target=execute_crawl_in_thread,
+            name="grantspotter-crawl",
+            daemon=True,
+        )
+        crawl_thread.start()
+        return {"status": "started", "started_at": started_at}
 
 
 async def scheduled_crawl() -> None:
-    global crawl_task
-    if crawl_task and not crawl_task.done():
+    result = start_crawl_thread()
+    if result["status"] == "already_running":
         print("Scheduled crawl skipped because another crawl is already running")
-        return
-    crawl_task = asyncio.create_task(execute_crawl())
 
 
 @asynccontextmanager
@@ -78,7 +105,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="GrantSpotter Crawler API", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="GrantSpotter Crawler API", version="1.2.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -91,19 +118,8 @@ def health():
 
 
 @app.post("/admin/crawl/govuk", dependencies=[Depends(require_admin)], status_code=202)
-async def run_govuk_crawl():
-    global crawl_task
-    if crawl_task and not crawl_task.done():
-        return {
-            "status": "already_running",
-            "started_at": crawl_state["started_at"],
-        }
-
-    crawl_task = asyncio.create_task(execute_crawl())
-    return {
-        "status": "started",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }
+def run_govuk_crawl():
+    return start_crawl_thread()
 
 
 @app.get("/admin/crawl/status", dependencies=[Depends(require_admin)])
@@ -117,7 +133,7 @@ def list_grants(status: str | None = Query(default=None), limit: int = Query(def
 
 
 @app.post("/admin/grants/{grant_id}/review", dependencies=[Depends(require_admin)])
-async def review_grant(grant_id: str, action: ReviewAction):
+def review_grant(grant_id: str, action: ReviewAction):
     db = Database()
     grant = db.get_grant(grant_id)
     if not grant:
