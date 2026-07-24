@@ -1,0 +1,1 @@
+<?php require 'bootstrap.php'; require 'partials.php'; site_header('Terms'); ?><section class="legal"><h1>Terms</h1><p>GrantSpotter helps users discover funding opportunities but does not guarantee eligibility, application success, or continued availability. Replace this placeholder with professionally reviewed terms before launch.</p></section><?php site_footer(); ?>
