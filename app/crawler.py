@@ -20,19 +20,23 @@ async def crawl_govuk() -> CrawlResult:
 
     adapter = GovUkFindAGrantAdapter()
     try:
-        urls = await adapter.discover_detail_urls(max_pages=max(1, settings().max_pages_per_run // 10 + 1))
+        urls = await adapter.discover_detail_urls(
+            max_pages=max(1, settings().max_pages_per_run // 10 + 1)
+        )
         urls = urls[: settings().max_pages_per_run]
         result.discovered = len(urls)
 
         for url in urls:
+            final_url = url
             try:
                 status_code, final_url, html = await adapter.fetch(url)
                 page_title, clean_text = adapter.clean_page(html, final_url)
+                if not clean_text.strip():
+                    raise ValueError("No readable grant-page content was extracted")
+
                 digest = content_hash(clean_text)
                 previous = db.get_page(final_url)
 
-                # Do not mark a page as processed until the corresponding grant
-                # has been successfully inserted or updated.
                 page_payload: dict[str, Any] = {
                     "source_id": source["id"],
                     "url": final_url,
@@ -47,7 +51,6 @@ async def crawl_govuk() -> CrawlResult:
                 }
                 page = db.upsert_page(page_payload)
 
-                # Skip only pages that were previously completed successfully.
                 if (
                     previous
                     and previous.get("content_hash") == digest
@@ -57,8 +60,24 @@ async def crawl_govuk() -> CrawlResult:
                     continue
 
                 baseline = deterministic_extract(page_title, clean_text, final_url)
-                extracted = ai_extract(page_title, clean_text, final_url, baseline)
-                score, reasons = validate_and_score(extracted, "find-government-grants.service.gov.uk")
+                extraction_notes: list[str] = []
+
+                # AI is an enhancement, not a single point of failure. If the
+                # API key, model, schema, quota or response fails, save the
+                # deterministic extraction for manual review instead.
+                try:
+                    extracted = ai_extract(page_title, clean_text, final_url, baseline)
+                except Exception as ai_exc:
+                    extracted = baseline
+                    extraction_notes.append(
+                        f"AI extraction unavailable; deterministic fallback used: {str(ai_exc)[:500]}"
+                    )
+
+                score, reasons = validate_and_score(
+                    extracted, "find-government-grants.service.gov.uk"
+                )
+                reasons = extraction_notes + reasons
+
                 fp = fingerprint(
                     extracted.grant_title,
                     extracted.funder_name,
@@ -67,7 +86,11 @@ async def crawl_govuk() -> CrawlResult:
                     extracted.application_url or extracted.official_source_url,
                 )
 
-                verification = "approved" if score >= settings().auto_publish_min_score else "review"
+                verification = (
+                    "approved"
+                    if score >= settings().auto_publish_min_score and not extraction_notes
+                    else "review"
+                )
                 if extracted.is_currently_open is False:
                     verification = "closed"
 
@@ -83,13 +106,15 @@ async def crawl_govuk() -> CrawlResult:
                 }
                 grant, created = db.upsert_grant(payload)
 
-                db.upsert_page({
-                    "source_id": source["id"],
-                    "url": final_url,
-                    "processing_status": "processed",
-                    "error_message": None,
-                    "last_checked_at": datetime.now(timezone.utc).isoformat(),
-                })
+                db.upsert_page(
+                    {
+                        "source_id": source["id"],
+                        "url": final_url,
+                        "processing_status": "processed",
+                        "error_message": None,
+                        "last_checked_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
 
                 if created:
                     result.created += 1
@@ -108,14 +133,16 @@ async def crawl_govuk() -> CrawlResult:
             except Exception as exc:
                 result.failed += 1
                 try:
-                    db.upsert_page({
-                        "source_id": source["id"],
-                        "url": url,
-                        "http_status": 0,
-                        "processing_status": "failed",
-                        "error_message": str(exc)[:2000],
-                        "last_checked_at": datetime.now(timezone.utc).isoformat(),
-                    })
+                    db.upsert_page(
+                        {
+                            "source_id": source["id"],
+                            "url": final_url,
+                            "http_status": 0,
+                            "processing_status": "failed",
+                            "error_message": str(exc)[:2000],
+                            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
                 except Exception:
                     pass
 
