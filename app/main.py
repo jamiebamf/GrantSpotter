@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .config import settings
 from .crawler import crawl_govuk
 from .db import Database
+from .fact_check_routes import router as fact_check_router
 from .models import ReviewAction
 from .publisher import publish_to_website
 
@@ -129,7 +130,8 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="GrantSpotter Crawler API", version="1.3.0", lifespan=lifespan)
+app = FastAPI(title="GrantSpotter Crawler API", version="1.4.0", lifespan=lifespan)
+app.include_router(fact_check_router)
 
 
 @app.get("/", include_in_schema=False)
