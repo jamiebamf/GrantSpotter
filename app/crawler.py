@@ -46,6 +46,27 @@ async def _process_source(
 
                 digest = content_hash(clean_text)
                 previous = db.get_page(final_url)
+
+                if (
+                    previous
+                    and previous.get("content_hash") == digest
+                    and previous.get("processing_status") == "processed"
+                ):
+                    db.upsert_page(
+                        {
+                            "source_id": source["id"],
+                            "url": final_url,
+                            "page_title": page_title,
+                            "http_status": status_code,
+                            "content_hash": digest,
+                            "processing_status": "processed",
+                            "error_message": None,
+                            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
+                    result.unchanged += 1
+                    continue
+
                 page_payload: dict[str, Any] = {
                     "source_id": source["id"],
                     "url": final_url,
@@ -59,14 +80,6 @@ async def _process_source(
                     "error_message": None,
                 }
                 page = db.upsert_page(page_payload)
-
-                if (
-                    previous
-                    and previous.get("content_hash") == digest
-                    and previous.get("processing_status") == "processed"
-                ):
-                    result.unchanged += 1
-                    continue
 
                 baseline = deterministic_extract(page_title, clean_text, final_url)
                 extraction_notes: list[str] = []
