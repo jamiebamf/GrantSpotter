@@ -56,10 +56,28 @@ class Database:
         }).execute()
 
     def list_grants(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        query = self.client.table("grants").select("*").order("created_at", desc=True).limit(limit)
-        if status:
-            query = query.eq("verification_status", status)
-        return query.execute().data or []
+        # Supabase/PostgREST commonly caps a single response at 1,000 rows.
+        # The dashboard asks for 500 records, which historically truncated totals.
+        # Treat a request of 500 or more as "all" and fetch in safe pages.
+        if limit < 500:
+            query = self.client.table("grants").select("*").order("created_at", desc=True).limit(limit)
+            if status:
+                query = query.eq("verification_status", status)
+            return query.execute().data or []
+
+        rows: list[dict[str, Any]] = []
+        page_size = 1000
+        start = 0
+        while True:
+            query = self.client.table("grants").select("*").order("created_at", desc=True).range(start, start + page_size - 1)
+            if status:
+                query = query.eq("verification_status", status)
+            batch = query.execute().data or []
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            start += page_size
+        return rows
 
     def get_grant(self, grant_id: str) -> dict[str, Any] | None:
         result = self.client.table("grants").select("*").eq("id", grant_id).limit(1).execute()
