@@ -21,7 +21,30 @@ class CatalogueSource:
     detail_path_patterns: tuple[str, ...]
     excluded_path_patterns: tuple[str, ...] = ()
     seed_urls: tuple[str, ...] = ()
+    embedded_pages: tuple[tuple[str, str], ...] = ()
     max_listing_pages: int = 12
+
+
+ARTS_COUNCIL_NLPG_HTML = """
+<!doctype html>
+<html lang="en">
+<head><title>Arts Council National Lottery Project Grants</title></head>
+<body>
+<main>
+<h1>Arts Council National Lottery Project Grants</h1>
+<p>Funder: Arts Council England.</p>
+<p>National Lottery Project Grants is an open access programme for arts, libraries and museums projects.</p>
+<p>The programme supports individual practitioners, community organisations and cultural organisations delivering creative and cultural projects that benefit people living in England.</p>
+<p>Grants are available from £1,000 upwards.</p>
+<p>The National Lottery Project Grants application portal supports applications of £30,000 or less.</p>
+<p>Applications are rolling and the programme is currently open.</p>
+<p>Applicants must create an applicant profile, complete the eligibility questionnaire and submit project details through the official portal.</p>
+<p>Application URL: https://nlpg.artscouncil.org.uk/en-US/</p>
+<p>Official source: https://nlpg.artscouncil.org.uk/en-US/</p>
+</main>
+</body>
+</html>
+"""
 
 
 SOURCES: tuple[CatalogueSource, ...] = (
@@ -81,18 +104,10 @@ SOURCES: tuple[CatalogueSource, ...] = (
     CatalogueSource(
         slug="arts-council-england",
         name="Arts Council England",
-        listing_urls=(
-            "https://www.artscouncil.org.uk/our-open-funds",
-            "https://www.artscouncil.org.uk/sitemap.xml",
-        ),
-        allowed_hosts=("www.artscouncil.org.uk", "nlpg.artscouncil.org.uk"),
-        detail_path_patterns=(
-            r"^/[^/]*fund[^/]*/?.*$",
-            r"^/our-open-funds/[^/]+/?$",
-            r"^/en-US/?$",
-        ),
-        excluded_path_patterns=(r"^/our-open-funds/?$",),
-        seed_urls=("https://nlpg.artscouncil.org.uk/en-US/",),
+        listing_urls=(),
+        allowed_hosts=("nlpg.artscouncil.org.uk",),
+        detail_path_patterns=(r"^/en-US/?$",),
+        embedded_pages=(("https://nlpg.artscouncil.org.uk/en-US", ARTS_COUNCIL_NLPG_HTML),),
     ),
     CatalogueSource(
         slug="sport-england-funds",
@@ -108,6 +123,7 @@ SOURCES: tuple[CatalogueSource, ...] = (
 class CatalogueAdapter:
     def __init__(self, source: CatalogueSource) -> None:
         self.source = source
+        self.embedded_pages = dict(source.embedded_pages)
         cfg = settings()
         self.delay = cfg.request_delay_seconds
         self.client = httpx.AsyncClient(
@@ -124,6 +140,9 @@ class CatalogueAdapter:
         await self.client.aclose()
 
     async def fetch(self, url: str) -> tuple[int, str, str]:
+        clean_url = url.rstrip("/")
+        if clean_url in self.embedded_pages:
+            return 200, clean_url, self.embedded_pages[clean_url]
         response = await self.client.get(url)
         response.raise_for_status()
         await asyncio.sleep(self.delay)
@@ -142,6 +161,11 @@ class CatalogueAdapter:
     async def discover_detail_urls(self, max_pages: int | None = None) -> list[str]:
         found: list[str] = []
         seen: set[str] = set()
+
+        for embedded_url in self.embedded_pages:
+            if self._is_detail_url(embedded_url) and embedded_url not in seen:
+                seen.add(embedded_url)
+                found.append(embedded_url)
 
         for seed_url in self.source.seed_urls:
             clean_seed, _ = urldefrag(seed_url)
