@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from .config import settings
@@ -12,6 +15,21 @@ from .fact_checker import fact_check_grant
 
 router = APIRouter(prefix="/admin", tags=["fact-checking"])
 FACT_CHECK_HTML = Path(__file__).with_name("fact_check_dashboard.html")
+
+bulk_lock = threading.Lock()
+bulk_thread: threading.Thread | None = None
+bulk_state: dict[str, Any] = {
+    "status": "idle",
+    "started_at": None,
+    "finished_at": None,
+    "source_id": None,
+    "requested": 0,
+    "completed": 0,
+    "succeeded": 0,
+    "failed": 0,
+    "current_grant": None,
+    "errors": [],
+}
 
 
 def require_admin(x_admin_key: str = Header(default="")) -> None:
@@ -58,3 +76,82 @@ def accept_fact_check(grant_id: str, fact_check_id: str, payload: dict[str, Any]
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _run_bulk_fact_check(grants: list[dict[str, Any]], source_id: str | None) -> None:
+    global bulk_thread
+    bulk_state.update({
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "source_id": source_id,
+        "requested": len(grants),
+        "completed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "current_grant": None,
+        "errors": [],
+    })
+    db = Database()
+    try:
+        for grant in grants:
+            bulk_state["current_grant"] = {
+                "id": grant.get("id"),
+                "title": grant.get("grant_title"),
+            }
+            try:
+                result = asyncio.run(fact_check_grant(grant))
+                db.create_fact_check(grant["id"], result)
+                bulk_state["succeeded"] += 1
+            except Exception as exc:
+                bulk_state["failed"] += 1
+                errors = bulk_state["errors"]
+                if len(errors) < 20:
+                    errors.append({
+                        "grant_id": grant.get("id"),
+                        "title": grant.get("grant_title"),
+                        "error": str(exc)[:500],
+                    })
+            finally:
+                bulk_state["completed"] += 1
+        bulk_state["status"] = "completed"
+    except Exception as exc:
+        bulk_state["status"] = "failed"
+        bulk_state["errors"].append({"error": str(exc)[:1000]})
+    finally:
+        bulk_state["current_grant"] = None
+        bulk_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+        with bulk_lock:
+            bulk_thread = None
+
+
+@router.post("/fact-check/bulk", dependencies=[Depends(require_admin)], status_code=202)
+def start_bulk_fact_check(
+    source_id: str | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=25),
+):
+    global bulk_thread
+    with bulk_lock:
+        if bulk_thread and bulk_thread.is_alive():
+            return {"status": "already_running", **bulk_state}
+
+        grants = Database().list_grants(status="review", limit=500)
+        if source_id:
+            grants = [grant for grant in grants if grant.get("source_id") == source_id]
+        grants = grants[:limit]
+        if not grants:
+            return {"status": "nothing_to_check", "requested": 0}
+
+        bulk_thread = threading.Thread(
+            target=_run_bulk_fact_check,
+            args=(grants, source_id),
+            name="grantspotter-bulk-fact-check",
+            daemon=True,
+        )
+        bulk_thread.start()
+        return {"status": "started", "requested": len(grants), "source_id": source_id}
+
+
+@router.get("/fact-check/bulk/status", dependencies=[Depends(require_admin)])
+def bulk_fact_check_status():
+    return bulk_state
