@@ -20,6 +20,7 @@ class CatalogueSource:
     allowed_hosts: tuple[str, ...]
     detail_path_patterns: tuple[str, ...]
     excluded_path_patterns: tuple[str, ...] = ()
+    seed_urls: tuple[str, ...] = ()
     max_listing_pages: int = 12
 
 
@@ -53,8 +54,8 @@ SOURCES: tuple[CatalogueSource, ...] = (
         slug="scotland-business-funding",
         name="Find Business Support Scotland",
         listing_urls=(
+            "https://findbusinesssupport.gov.scot/sitemap",
             "https://findbusinesssupport.gov.scot/search?type=Funding",
-            "https://findbusinesssupport.gov.scot/service/funding",
         ),
         allowed_hosts=("findbusinesssupport.gov.scot",),
         detail_path_patterns=(r"^/service/funding/[^/]+/?$",),
@@ -80,10 +81,18 @@ SOURCES: tuple[CatalogueSource, ...] = (
     CatalogueSource(
         slug="arts-council-england",
         name="Arts Council England",
-        listing_urls=("https://www.artscouncil.org.uk/our-open-funds",),
-        allowed_hosts=("www.artscouncil.org.uk",),
-        detail_path_patterns=(r"^/[^/]*fund[^/]*/?.*$", r"^/our-open-funds/[^/]+/?$"),
+        listing_urls=(
+            "https://www.artscouncil.org.uk/our-open-funds",
+            "https://www.artscouncil.org.uk/sitemap.xml",
+        ),
+        allowed_hosts=("www.artscouncil.org.uk", "nlpg.artscouncil.org.uk"),
+        detail_path_patterns=(
+            r"^/[^/]*fund[^/]*/?.*$",
+            r"^/our-open-funds/[^/]+/?$",
+            r"^/en-US/?$",
+        ),
         excluded_path_patterns=(r"^/our-open-funds/?$",),
+        seed_urls=("https://nlpg.artscouncil.org.uk/en-US/",),
     ),
     CatalogueSource(
         slug="sport-england-funds",
@@ -107,7 +116,7 @@ class CatalogueAdapter:
             headers={
                 "User-Agent": cfg.crawler_user_agent,
                 "Accept-Language": "en-GB,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml",
+                "Accept": "text/html,application/xhtml+xml,application/xml,text/xml",
             },
         )
 
@@ -133,6 +142,15 @@ class CatalogueAdapter:
     async def discover_detail_urls(self, max_pages: int | None = None) -> list[str]:
         found: list[str] = []
         seen: set[str] = set()
+
+        for seed_url in self.source.seed_urls:
+            clean_seed, _ = urldefrag(seed_url)
+            parsed_seed = urlparse(clean_seed)
+            clean_seed = f"{parsed_seed.scheme}://{parsed_seed.netloc}{parsed_seed.path.rstrip('/')}"
+            if self._is_detail_url(clean_seed) and clean_seed not in seen:
+                seen.add(clean_seed)
+                found.append(clean_seed)
+
         listings = self.source.listing_urls[: max_pages or self.source.max_listing_pages]
         for listing_url in listings:
             try:
@@ -140,10 +158,16 @@ class CatalogueAdapter:
             except Exception as exc:
                 print(f"Listing fetch failed for {listing_url}: {exc}")
                 continue
+
             soup = BeautifulSoup(html, "html.parser")
+            candidates: list[str] = []
             for anchor in soup.select("a[href]"):
-                absolute = urljoin(final_listing_url, anchor.get("href", ""))
-                absolute, _ = urldefrag(absolute)
+                candidates.append(urljoin(final_listing_url, anchor.get("href", "")))
+            for loc in soup.select("loc"):
+                candidates.append(loc.get_text(" ", strip=True))
+
+            for candidate in candidates:
+                absolute, _ = urldefrag(candidate)
                 parsed = urlparse(absolute)
                 clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
                 if self._is_detail_url(clean) and clean not in seen:
