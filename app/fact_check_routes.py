@@ -134,7 +134,8 @@ def _run_bulk_fact_check(
 @router.post("/fact-check/bulk", dependencies=[Depends(require_admin)], status_code=202)
 def start_bulk_fact_check(
     source_id: str | None = Query(default=None),
-    limit: int = Query(default=10, ge=1, le=25),
+    limit: int = Query(default=10, ge=1, le=1000),
+    all_unchecked: bool = Query(default=False),
     recheck: bool = Query(default=False),
 ):
     global bulk_thread
@@ -155,12 +156,15 @@ def start_bulk_fact_check(
             grants = [grant for grant in grants if grant.get("id") not in checked_ids]
             skipped_already_checked = before - len(grants)
 
-        grants = grants[:limit]
+        if not all_unchecked:
+            grants = grants[:limit]
+
         if not grants:
+            now = datetime.now(timezone.utc).isoformat()
             bulk_state.update({
                 "status": "completed",
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "started_at": now,
+                "finished_at": now,
                 "source_id": source_id,
                 "requested": 0,
                 "completed": 0,
@@ -189,6 +193,7 @@ def start_bulk_fact_check(
             "source_id": source_id,
             "skipped_already_checked": skipped_already_checked,
             "recheck": recheck,
+            "all_unchecked": all_unchecked,
         }
 
 
