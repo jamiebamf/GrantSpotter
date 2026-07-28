@@ -27,6 +27,7 @@ bulk_state: dict[str, Any] = {
     "completed": 0,
     "succeeded": 0,
     "failed": 0,
+    "skipped_already_checked": 0,
     "current_grant": None,
     "errors": [],
 }
@@ -78,7 +79,11 @@ def accept_fact_check(grant_id: str, fact_check_id: str, payload: dict[str, Any]
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-def _run_bulk_fact_check(grants: list[dict[str, Any]], source_id: str | None) -> None:
+def _run_bulk_fact_check(
+    grants: list[dict[str, Any]],
+    source_id: str | None,
+    skipped_already_checked: int,
+) -> None:
     global bulk_thread
     bulk_state.update({
         "status": "running",
@@ -89,6 +94,7 @@ def _run_bulk_fact_check(grants: list[dict[str, Any]], source_id: str | None) ->
         "completed": 0,
         "succeeded": 0,
         "failed": 0,
+        "skipped_already_checked": skipped_already_checked,
         "current_grant": None,
         "errors": [],
     })
@@ -129,27 +135,61 @@ def _run_bulk_fact_check(grants: list[dict[str, Any]], source_id: str | None) ->
 def start_bulk_fact_check(
     source_id: str | None = Query(default=None),
     limit: int = Query(default=10, ge=1, le=25),
+    recheck: bool = Query(default=False),
 ):
     global bulk_thread
     with bulk_lock:
         if bulk_thread and bulk_thread.is_alive():
             return {"status": "already_running", **bulk_state}
 
-        grants = Database().list_grants(status="review", limit=500)
+        db = Database()
+        grants = db.list_grants(status="review", limit=500)
         if source_id:
             grants = [grant for grant in grants if grant.get("source_id") == source_id]
+
+        skipped_already_checked = 0
+        if not recheck:
+            checked_rows = db.client.table("grant_fact_checks").select("grant_id").eq("status", "completed").execute().data or []
+            checked_ids = {row.get("grant_id") for row in checked_rows if row.get("grant_id")}
+            before = len(grants)
+            grants = [grant for grant in grants if grant.get("id") not in checked_ids]
+            skipped_already_checked = before - len(grants)
+
         grants = grants[:limit]
         if not grants:
-            return {"status": "nothing_to_check", "requested": 0}
+            bulk_state.update({
+                "status": "completed",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "source_id": source_id,
+                "requested": 0,
+                "completed": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "skipped_already_checked": skipped_already_checked,
+                "current_grant": None,
+                "errors": [],
+            })
+            return {
+                "status": "nothing_to_check",
+                "requested": 0,
+                "skipped_already_checked": skipped_already_checked,
+            }
 
         bulk_thread = threading.Thread(
             target=_run_bulk_fact_check,
-            args=(grants, source_id),
+            args=(grants, source_id, skipped_already_checked),
             name="grantspotter-bulk-fact-check",
             daemon=True,
         )
         bulk_thread.start()
-        return {"status": "started", "requested": len(grants), "source_id": source_id}
+        return {
+            "status": "started",
+            "requested": len(grants),
+            "source_id": source_id,
+            "skipped_already_checked": skipped_already_checked,
+            "recheck": recheck,
+        }
 
 
 @router.get("/fact-check/bulk/status", dependencies=[Depends(require_admin)])
