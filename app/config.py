@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     crawler_user_agent: str = "GrantSpotterBot/1.0"
     supabase_url: str = ""
     supabase_service_role_key: str = ""
+    supabase_anon_key: str = ""
+    companies_house_api_key: str = ""
     openai_api_key: str = ""
     openai_model: str = "gpt-5-mini"
     website_import_url: str = ""
