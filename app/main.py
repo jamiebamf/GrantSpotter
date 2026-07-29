@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .config import settings
 from .crawler import crawl_all_sources
+from .customer_registration import router as customer_registration_router
 from .db import Database
 from .fact_check_routes import router as fact_check_router
 from .models import ReviewAction
@@ -100,8 +101,9 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="GrantSpotter Crawler API", version="1.6.0", lifespan=lifespan)
+app = FastAPI(title="GrantSpotter API", version="1.7.0", lifespan=lifespan)
 app.include_router(fact_check_router)
+app.include_router(customer_registration_router)
 
 
 @app.get("/", include_in_schema=False)
