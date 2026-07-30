@@ -119,6 +119,21 @@ async def lookup_company(company_number: str):
     }
 
 
+def _friendly_database_error(exc: Exception) -> str:
+    message = str(exc)
+    lower = message.lower()
+    if "customer_profiles" in lower or "customer_organisations" in lower or "customer_organisation_members" in lower:
+        if "does not exist" in lower or "schema cache" in lower or "could not find" in lower:
+            return "Customer database tables are missing. Run supabase/customer_registration.sql in the Supabase SQL Editor."
+    if "duplicate key" in lower and "company" in lower:
+        return "This organisation is already linked to another GrantSpotter account."
+    if "duplicate key" in lower or "unique constraint" in lower:
+        return "An account or organisation with these details already exists."
+    if "row-level security" in lower or "permission denied" in lower:
+        return "Supabase permissions blocked the registration. Check the service-role key and database policies."
+    return f"The account could not be completed: {message[:350]}"
+
+
 @router.post("/api/register", status_code=201)
 def register_customer(payload: RegistrationPayload):
     cfg = settings()
@@ -136,9 +151,9 @@ def register_customer(payload: RegistrationPayload):
         verification_status = "customer_confirmed" if payload.organisation_confirmed else "register_found"
     elif payload.organisation_type == "registered_charity":
         verification_source = "charity_commission"
-        verification_status = "manual_review"
 
     auth_client = create_client(cfg.supabase_url, cfg.supabase_anon_key)
+    created_user_id: str | None = None
     try:
         auth_result = auth_client.auth.sign_up({
             "email": str(payload.email),
@@ -150,61 +165,70 @@ def register_customer(payload: RegistrationPayload):
                 }
             },
         })
+        user = getattr(auth_result, "user", None)
+        if not user or not user.id:
+            raise HTTPException(status_code=502, detail="Supabase did not return a customer account")
+        created_user_id = str(user.id)
+    except HTTPException:
+        raise
     except Exception as exc:
         message = str(exc)
         if "already" in message.lower() or "registered" in message.lower():
             raise HTTPException(status_code=409, detail="An account already exists for this email") from exc
-        raise HTTPException(status_code=502, detail="We could not create the account") from exc
-
-    user = getattr(auth_result, "user", None)
-    if not user or not user.id:
-        raise HTTPException(status_code=502, detail="Supabase did not return a customer account")
+        raise HTTPException(status_code=502, detail=f"We could not create the account: {message[:250]}") from exc
 
     db = Database()
     now = datetime.now(timezone.utc).isoformat()
-    profile = {
-        "user_id": str(user.id),
-        "first_name": payload.first_name.strip(),
-        "last_name": payload.last_name.strip(),
-        "phone": payload.phone.strip() or None,
-        "job_title": payload.job_title.strip() or None,
-        "marketing_consent": payload.marketing_consent,
-        "terms_accepted_at": now,
-        "onboarding_status": "complete" if payload.organisation_confirmed or payload.organisation_type not in REGISTERED_TYPES else "manual_review",
-        "updated_at": now,
-    }
-    db.client.table("customer_profiles").insert(profile).execute()
+    try:
+        profile = {
+            "user_id": created_user_id,
+            "first_name": payload.first_name.strip(),
+            "last_name": payload.last_name.strip(),
+            "phone": payload.phone.strip() or None,
+            "job_title": payload.job_title.strip() or None,
+            "marketing_consent": payload.marketing_consent,
+            "terms_accepted_at": now,
+            "onboarding_status": "complete" if payload.organisation_confirmed or payload.organisation_type not in REGISTERED_TYPES else "manual_review",
+            "updated_at": now,
+        }
+        db.client.table("customer_profiles").insert(profile).execute()
 
-    organisation = {
-        "owner_user_id": str(user.id),
-        "organisation_type": payload.organisation_type,
-        "legal_name": payload.legal_name.strip(),
-        "trading_name": payload.trading_name.strip() or None,
-        "company_number": company_number,
-        "charity_number": (payload.charity_number or "").strip() or None,
-        "verification_source": verification_source,
-        "verification_status": verification_status,
-        "verified_at": now if verification_status == "customer_confirmed" else None,
-        "official_data": payload.official_data,
-        "registered_address": payload.registered_address,
-        "website": payload.website.strip() or None,
-        "description": payload.description.strip() or None,
-        "turnover_band": payload.turnover_band or None,
-        "employee_band": payload.employee_band or None,
-        "geographic_areas": payload.geographic_areas,
-        "causes": payload.causes,
-        "beneficiaries": payload.beneficiaries,
-        "updated_at": now,
-    }
-    org_result = db.client.table("customer_organisations").insert(organisation).execute()
-    if not org_result.data:
-        raise HTTPException(status_code=502, detail="Account created but organisation profile could not be saved")
-    organisation_id = org_result.data[0]["id"]
-    db.client.table("customer_organisation_members").insert({
-        "organisation_id": organisation_id,
-        "user_id": str(user.id),
-        "member_role": "owner",
-    }).execute()
+        organisation = {
+            "owner_user_id": created_user_id,
+            "organisation_type": payload.organisation_type,
+            "legal_name": payload.legal_name.strip(),
+            "trading_name": payload.trading_name.strip() or None,
+            "company_number": company_number,
+            "charity_number": (payload.charity_number or "").strip() or None,
+            "verification_source": verification_source,
+            "verification_status": verification_status,
+            "verified_at": now if verification_status == "customer_confirmed" else None,
+            "official_data": payload.official_data,
+            "registered_address": payload.registered_address,
+            "website": payload.website.strip() or None,
+            "description": payload.description.strip() or None,
+            "turnover_band": payload.turnover_band or None,
+            "employee_band": payload.employee_band or None,
+            "geographic_areas": payload.geographic_areas,
+            "causes": payload.causes,
+            "beneficiaries": payload.beneficiaries,
+            "updated_at": now,
+        }
+        org_result = db.client.table("customer_organisations").insert(organisation).execute()
+        if not org_result.data:
+            raise RuntimeError("Supabase did not return the saved organisation")
+        organisation_id = org_result.data[0]["id"]
+        db.client.table("customer_organisation_members").insert({
+            "organisation_id": organisation_id,
+            "user_id": created_user_id,
+            "member_role": "owner",
+        }).execute()
+    except Exception as exc:
+        try:
+            db.client.auth.admin.delete_user(created_user_id)
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=_friendly_database_error(exc)) from exc
 
     return {
         "status": "confirmation_required",
