@@ -14,6 +14,7 @@ from .db import Database
 
 router = APIRouter(tags=["customer-portal"])
 PORTAL_HTML = Path(__file__).with_name("customer_portal.html")
+CONFIRMATION_HTML = Path(__file__).with_name("customer_confirmation.html")
 
 
 class LoginPayload(BaseModel):
@@ -56,6 +57,13 @@ def login_page():
 @router.get("/portal", include_in_schema=False)
 def portal_page():
     return login_page()
+
+
+@router.get("/confirmation-complete", include_in_schema=False)
+def confirmation_complete_page():
+    if not CONFIRMATION_HTML.exists():
+        raise HTTPException(status_code=500, detail="Confirmation page is missing")
+    return FileResponse(CONFIRMATION_HTML, media_type="text/html")
 
 
 @router.post("/api/customer/login")
