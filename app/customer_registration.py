@@ -130,8 +130,8 @@ def _friendly_database_error(exc: Exception) -> str:
     if "duplicate key" in lower or "unique constraint" in lower:
         return "An account or organisation with these details already exists."
     if "row-level security" in lower or "permission denied" in lower:
-        return "Supabase permissions blocked the registration. Check the service-role key and database policies."
-    return f"The account could not be completed: {message[:350]}"
+        return f"Supabase permissions error: {message[:500]}"
+    return f"The account could not be completed: {message[:500]}"
 
 
 @router.post("/api/register", status_code=201)
