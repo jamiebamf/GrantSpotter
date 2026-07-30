@@ -163,10 +163,11 @@ def register_customer(payload: RegistrationPayload):
             "email": str(payload.email),
             "password": payload.password,
             "options": {
+                "email_redirect_to": "https://grantspotter-crawler.onrender.com/confirmation-complete",
                 "data": {
                     "first_name": payload.first_name.strip(),
                     "last_name": payload.last_name.strip(),
-                }
+                },
             },
         })
         user = getattr(auth_result, "user", None)
