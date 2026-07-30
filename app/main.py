@@ -1,12 +1,13 @@
 from __future__ import annotations
 import asyncio
 import threading
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .config import settings
 from .crawler import crawl_all_sources
@@ -102,10 +103,26 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="GrantSpotter API", version="1.8.0", lifespan=lifespan)
+app = FastAPI(title="GrantSpotter API", version="1.8.1", lifespan=lifespan)
 app.include_router(fact_check_router)
 app.include_router(customer_registration_router)
 app.include_router(customer_portal_router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    error_type = type(exc).__name__
+    error_message = str(exc) or "No error message was supplied"
+    print(f"Unhandled error on {request.method} {request.url.path}: {error_type}: {error_message}")
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"Server error ({error_type}): {error_message[:700]}",
+            "path": request.url.path,
+            "version": "1.8.1",
+        },
+    )
 
 
 @app.get("/", include_in_schema=False)
@@ -124,6 +141,7 @@ def admin_dashboard():
 def health():
     return {
         "status": "ok",
+        "version": "1.8.1",
         "time": datetime.now(timezone.utc).isoformat(),
         "crawl_status": crawl_state["status"],
     }
