@@ -15,10 +15,22 @@ from .db import Database
 router = APIRouter(tags=["customer-portal"])
 PORTAL_HTML = Path(__file__).with_name("customer_portal.html")
 CONFIRMATION_HTML = Path(__file__).with_name("customer_confirmation.html")
+RESET_HTML = Path(__file__).with_name("customer_reset_password.html")
+APP_URL = "https://grantspotter-crawler.onrender.com"
 
 
 class LoginPayload(BaseModel):
     email: EmailStr
+    password: str = Field(min_length=8, max_length=200)
+
+
+class EmailPayload(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordPayload(BaseModel):
+    access_token: str = Field(min_length=20)
+    refresh_token: str = Field(min_length=20)
     password: str = Field(min_length=8, max_length=200)
 
 
@@ -66,6 +78,13 @@ def confirmation_complete_page():
     return FileResponse(CONFIRMATION_HTML, media_type="text/html")
 
 
+@router.get("/reset-password", include_in_schema=False)
+def reset_password_page():
+    if not RESET_HTML.exists():
+        raise HTTPException(status_code=500, detail="Password reset page is missing")
+    return FileResponse(RESET_HTML, media_type="text/html")
+
+
 @router.post("/api/customer/login")
 def customer_login(payload: LoginPayload):
     cfg = settings()
@@ -73,10 +92,7 @@ def customer_login(payload: LoginPayload):
         raise HTTPException(status_code=503, detail="Customer login is not configured")
     try:
         client = create_client(cfg.supabase_url, cfg.supabase_anon_key)
-        result = client.auth.sign_in_with_password({
-            "email": str(payload.email),
-            "password": payload.password,
-        })
+        result = client.auth.sign_in_with_password({"email": str(payload.email), "password": payload.password})
         session = getattr(result, "session", None)
         user = getattr(result, "user", None)
         if not session or not user:
@@ -96,6 +112,47 @@ def customer_login(payload: LoginPayload):
         raise HTTPException(status_code=401, detail="Email or password is incorrect") from exc
 
 
+@router.post("/api/customer/resend-confirmation")
+def resend_confirmation(payload: EmailPayload):
+    cfg = settings()
+    try:
+        client = create_client(cfg.supabase_url, cfg.supabase_anon_key)
+        client.auth.resend({
+            "type": "signup",
+            "email": str(payload.email),
+            "options": {"email_redirect_to": f"{APP_URL}/confirmation-complete"},
+        })
+    except Exception as exc:
+        if "rate limit" in str(exc).lower():
+            raise HTTPException(status_code=429, detail="Please wait before requesting another confirmation email") from exc
+    return {"message": "If the account still needs confirmation, a new email has been sent."}
+
+
+@router.post("/api/customer/password/forgot")
+def forgot_password(payload: EmailPayload):
+    cfg = settings()
+    try:
+        client = create_client(cfg.supabase_url, cfg.supabase_anon_key)
+        client.auth.reset_password_email(str(payload.email), {"redirect_to": f"{APP_URL}/reset-password"})
+    except Exception as exc:
+        if "rate limit" in str(exc).lower():
+            raise HTTPException(status_code=429, detail="Please wait before requesting another reset email") from exc
+    return {"message": "If an account exists for that email, a password reset link has been sent."}
+
+
+@router.post("/api/customer/password/reset")
+def reset_password(payload: ResetPasswordPayload):
+    cfg = settings()
+    try:
+        client = create_client(cfg.supabase_url, cfg.supabase_anon_key)
+        client.auth.set_session(payload.access_token, payload.refresh_token)
+        client.auth.update_user({"password": payload.password})
+        client.auth.sign_out()
+        return {"message": "Your password has been updated. You can now sign in."}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired. Request a new one.") from exc
+
+
 @router.post("/api/customer/refresh")
 def refresh_session(payload: dict[str, Any] = Body(...)):
     refresh_token = str(payload.get("refresh_token") or "").strip()
@@ -108,11 +165,7 @@ def refresh_session(payload: dict[str, Any] = Body(...)):
         session = getattr(result, "session", None)
         if not session:
             raise HTTPException(status_code=401, detail="Session could not be refreshed")
-        return {
-            "access_token": session.access_token,
-            "refresh_token": session.refresh_token,
-            "expires_in": session.expires_in,
-        }
+        return {"access_token": session.access_token, "refresh_token": session.refresh_token, "expires_in": session.expires_in}
     except HTTPException:
         raise
     except Exception as exc:
@@ -143,8 +196,7 @@ def update_customer(payload: dict[str, Any] = Body(...), authorization: str = He
     organisation_allowed = {
         "trading_name", "operating_address", "website", "contact_phone", "description",
         "turnover_band", "employee_band", "geographic_areas", "causes", "beneficiaries",
-        "preferred_grant_min", "preferred_grant_max", "match_funding_available",
-        "previous_grant_experience",
+        "preferred_grant_min", "preferred_grant_max", "match_funding_available", "previous_grant_experience",
     }
     profile_payload = {k: v for k, v in (payload.get("profile") or {}).items() if k in profile_allowed}
     org_payload = {k: v for k, v in (payload.get("organisation") or {}).items() if k in organisation_allowed}
@@ -175,20 +227,17 @@ def _match_score(grant: dict[str, Any], organisation: dict[str, Any]) -> tuple[i
     elif org_regions & grant_regions:
         score += 25
         reasons.append("Matches your operating area")
-
     org_causes = _normalise(organisation.get("causes"))
     grant_causes = _normalise(grant.get("eligible_causes"))
     cause_matches = org_causes & grant_causes
     if cause_matches:
         score += min(30, 10 + len(cause_matches) * 5)
         reasons.append("Matches your funding interests")
-
     org_type = str(organisation.get("organisation_type") or "").replace("_", " ").lower()
     grant_types = _normalise(grant.get("eligible_organisation_types"))
     if not grant_types or any(org_type in value or value in org_type for value in grant_types):
         score += 20
         reasons.append("Suitable for your organisation type")
-
     preferred_min = organisation.get("preferred_grant_min")
     preferred_max = organisation.get("preferred_grant_max")
     grant_min = grant.get("minimum_amount")
@@ -202,7 +251,6 @@ def _match_score(grant: dict[str, Any], organisation: dict[str, Any]) -> tuple[i
             if upper >= wanted_low and lower <= wanted_high:
                 score += 10
                 reasons.append("Funding amount fits your preference")
-
     if grant.get("verification_status") in {"approved", "published"}:
         score += 5
     return min(score, 100), reasons
@@ -222,25 +270,16 @@ def customer_matches(authorization: str = Header(default="")):
     grants = db.list_grants(limit=500)
     matches = []
     for grant in grants:
-        if grant.get("verification_status") not in {"approved", "published", "review"}:
-            continue
-        if grant.get("is_currently_open") is False:
+        if grant.get("verification_status") not in {"approved", "published", "review"} or grant.get("is_currently_open") is False:
             continue
         score, reasons = _match_score(grant, organisation)
         if score < 40:
             continue
         matches.append({
-            "id": grant.get("id"),
-            "grant_title": grant.get("grant_title"),
-            "funder_name": grant.get("funder_name"),
-            "summary": grant.get("summary"),
-            "minimum_amount": grant.get("minimum_amount"),
-            "maximum_amount": grant.get("maximum_amount"),
-            "deadline": grant.get("deadline"),
-            "deadline_type": grant.get("deadline_type"),
-            "application_url": grant.get("application_url"),
-            "match_score": score,
-            "match_reasons": reasons,
+            "id": grant.get("id"), "grant_title": grant.get("grant_title"), "funder_name": grant.get("funder_name"),
+            "summary": grant.get("summary"), "minimum_amount": grant.get("minimum_amount"), "maximum_amount": grant.get("maximum_amount"),
+            "deadline": grant.get("deadline"), "deadline_type": grant.get("deadline_type"), "application_url": grant.get("application_url"),
+            "match_score": score, "match_reasons": reasons,
         })
     matches.sort(key=lambda item: (-item["match_score"], item.get("deadline") or "9999-12-31"))
     return matches[:100]
